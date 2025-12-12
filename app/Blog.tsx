@@ -78,7 +78,18 @@ export default function Blog() {
     },
   ];
 
-  const samplePosts = [
+  type ColorKey = keyof typeof colorClasses;
+
+  const samplePosts: Array<{
+    id: string;
+    title: string;
+    category: string;
+    readTime: string;
+    date: string;
+    excerpt: string;
+    color: ColorKey;
+    image: string;
+  }> = [
     {
       id: "1",
       title: "10 Proven Study Techniques That Actually Work",

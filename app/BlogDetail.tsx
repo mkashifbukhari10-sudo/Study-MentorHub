@@ -218,7 +218,13 @@ export default function BlogDetail({ blogId }: BlogDetailProps) {
     },
   };
 
-  const blog = blogs[blogId ?? "1"] || blogs["1"];
+  type BlogId = keyof typeof blogs;
+  const resolvedId: BlogId =
+    (blogId && (Object.keys(blogs) as BlogId[]).includes(blogId as BlogId)
+      ? (blogId as BlogId)
+      : "1");
+
+  const blog = blogs[resolvedId] || blogs["1"];
 
   useEffect(() => {
     const handleScroll = () => {
@@ -238,7 +244,7 @@ export default function BlogDetail({ blogId }: BlogDetailProps) {
     return () => window.removeEventListener("scroll", handleScroll);
   }, [blog]);
 
-  const scrollToSection = (id) => {
+  const scrollToSection = (id: string) => {
     const element = document.getElementById(id);
     if (element) {
       const offset = 100;
