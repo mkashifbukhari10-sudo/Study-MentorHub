@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { createPageUrl } from "./utils";
 import { motion } from "framer-motion";
@@ -18,9 +18,28 @@ import {
   Award,
   Users,
   ArrowRight,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
+import {
+  fetchPosts,
+  getFeaturedImageUrl,
+  getPostCategories,
+  getPostAuthor,
+  formatDate,
+  calculateReadTime,
+  stripHtml,
+  WordPressPost,
+} from "./services/wordpressApi";
 
 export default function Blog() {
+  // State for WordPress posts
+  const [posts, setPosts] = useState<WordPressPost[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState<number>(1);
+  const [hasMore, setHasMore] = useState<boolean>(true);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const categories = [
     {
       icon: Lightbulb,
@@ -89,89 +108,90 @@ export default function Blog() {
 
   type ColorKey = keyof typeof colorClasses;
 
-  const samplePosts: Array<{
-    id: string;
-    title: string;
-    category: string;
-    readTime: string;
-    date: string;
-    excerpt: string;
-    color: ColorKey;
-    image: string;
-  }> = [
-    {
-      id: "1",
-      title: "10 Proven Study Techniques That Actually Work",
-      category: "Study Techniques",
-      readTime: "8 min read",
-      date: "2024",
-      excerpt:
-        "Discover evidence-based learning methods used by top students worldwide to maximize retention and understanding.",
-      color: "yellow",
-      image:
-        "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=800&q=80",
-    },
-    {
-      id: "2",
-      title: "The Ultimate Guide to Time Management for Students",
-      category: "Time Management",
-      readTime: "12 min read",
-      date: "2024",
-      excerpt:
-        "Master your schedule and find perfect balance between studies, social life, and personal growth.",
-      color: "blue",
-      image:
-        "https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?w=800&q=80",
-    },
-    {
-      id: "3",
-      title: "How to Stay Focused While Studying: Science-Backed Tips",
-      category: "Memory & Focus",
-      readTime: "6 min read",
-      date: "2024",
-      excerpt:
-        "Combat distractions and maintain laser focus with these proven concentration techniques.",
-      color: "purple",
-      image:
-        "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=800&q=80",
-    },
-    {
-      id: "4",
-      title: "Setting Academic Goals: A Student's Complete Guide",
-      category: "Goal Setting",
-      readTime: "10 min read",
-      date: "2024",
-      excerpt:
-        "Learn to set achievable goals and create action plans that lead to real academic success.",
-      color: "green",
-      image:
-        "https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?w=800&q=80",
-    },
-    {
-      id: "5",
-      title: "Exam Anxiety: How to Stay Calm and Perform Your Best",
-      category: "Exam Preparation",
-      readTime: "7 min read",
-      date: "2024",
-      excerpt:
-        "Overcome test stress and unlock your full potential with these powerful anxiety-management strategies.",
-      color: "red",
-      image:
-        "https://images.unsplash.com/photo-1517842645767-c639042777db?w=800&q=80",
-    },
-    {
-      id: "6",
-      title: "Productivity Hacks Every Student Should Know",
-      category: "Productivity",
-      readTime: "9 min read",
-      date: "2024",
-      excerpt:
-        "Boost your efficiency with tools, techniques, and habits that successful students swear by.",
-      color: "amber",
-      image:
-        "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800&q=80",
-    },
-  ];
+  // Fetch posts on component mount
+  useEffect(() => {
+    loadPosts();
+  }, []);
+
+  // Load posts from WordPress API
+  const loadPosts = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const fetchedPosts = await fetchPosts({
+        page: 1,
+        per_page: 10,
+      });
+
+      if (fetchedPosts.length === 0) {
+        setHasMore(false);
+      } else {
+        setPosts(fetchedPosts);
+        setHasMore(fetchedPosts.length === 10);
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load posts';
+      setError(errorMessage);
+      console.error('Error loading posts:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load more posts
+  const loadMorePosts = async () => {
+    if (loadingMore || !hasMore) return;
+
+    try {
+      setLoadingMore(true);
+      const nextPage = page + 1;
+      
+      const fetchedPosts = await fetchPosts({
+        page: nextPage,
+        per_page: 10,
+      });
+
+      if (fetchedPosts.length === 0) {
+        setHasMore(false);
+      } else {
+        setPosts((prev) => [...prev, ...fetchedPosts]);
+        setHasMore(fetchedPosts.length === 10);
+        setPage(nextPage);
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load more posts';
+      setError(errorMessage);
+      console.error('Error loading more posts:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // Map category name to color
+  const getCategoryColor = (categoryName: string): ColorKey => {
+    const categoryMap: Record<string, ColorKey> = {
+      'Study Techniques': 'yellow',
+      'Time Management': 'blue',
+      'Memory & Focus': 'purple',
+      'Goal Setting': 'green',
+      'Exam Preparation': 'red',
+      'Productivity': 'amber',
+    };
+    return categoryMap[categoryName] || 'blue';
+  };
+
+  // Get default image if no featured image
+  const getDefaultImage = (index: number): string => {
+    const defaultImages = [
+      "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=800&q=80",
+      "https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?w=800&q=80",
+      "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=800&q=80",
+      "https://images.unsplash.com/photo-1517842645767-c639042777db?w=800&q=80",
+      "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800&q=80",
+    ];
+    return defaultImages[index % defaultImages.length];
+  };
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -330,67 +350,147 @@ export default function Blog() {
             </p>
           </motion.div>
 
-          <motion.div
-            variants={containerVariants}
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true, margin: "-50px" }}
-            className="grid md:grid-cols-2 lg:grid-cols-3 gap-8"
-          >
-            {samplePosts.map((post, index) => (
-              <motion.div
-                key={index}
-                variants={itemVariants}
-                whileHover={{ y: -8 }}
-                transition={{ duration: 0.3 }}
-              >
-                <Link href={`${createPageUrl("BlogDetail")}?id=${post.id}`}>
-                  <Card className="h-full hover:shadow-2xl transition-all cursor-pointer border-none shadow-lg overflow-hidden group">
-                    {/* Featured Image */}
-                    <div className="relative h-48 overflow-hidden bg-slate-200">
-                      <img
-                        src={post.image}
-                        alt={post.title}
-                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                      />
-                      <div className="absolute top-4 left-4">
-                        <Badge
-                          className={`${
-                            colorClasses[post.color]
-                          } border shadow-lg`}
-                        >
-                          {post.category}
-                        </Badge>
-                      </div>
-                    </div>
+          {/* Loading State */}
+          {loading && posts.length === 0 && (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+              <span className="ml-3 text-slate-600">Loading posts...</span>
+            </div>
+          )}
 
-                    <CardHeader>
-                      <CardTitle className="text-xl leading-tight group-hover:text-indigo-600 transition-colors">
-                        {post.title}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-slate-600 mb-4 leading-relaxed line-clamp-2">
-                        {post.excerpt}
-                      </p>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4 text-sm text-slate-500">
-                          <div className="flex items-center gap-1">
-                            <Clock className="w-4 h-4" />
-                            <span>{post.readTime}</span>
+          {/* Error State */}
+          {error && posts.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20">
+              <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
+              <h3 className="text-xl font-semibold text-slate-900 mb-2">Error Loading Posts</h3>
+              <p className="text-slate-600 mb-4">{error}</p>
+              <button
+                onClick={loadPosts}
+                className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {/* Posts Grid */}
+          {!loading && posts.length > 0 && (
+            <motion.div
+              variants={containerVariants}
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-50px" }}
+              className="grid md:grid-cols-2 lg:grid-cols-3 gap-8"
+            >
+              {posts.map((post, index) => {
+                const featuredImage = getFeaturedImageUrl(post) || getDefaultImage(index);
+                const categories = getPostCategories(post);
+                const firstCategory = categories[0]?.name || 'Uncategorized';
+                const categoryColor = getCategoryColor(firstCategory);
+                const readTime = calculateReadTime(post.content.rendered);
+                const postDate = formatDate(post.date);
+
+                return (
+                  <motion.div
+                    key={post.id}
+                    variants={itemVariants}
+                    whileHover={{ y: -8 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <Link href={`${createPageUrl("BlogDetail")}?slug=${post.slug}`}>
+                      <Card className="h-full hover:shadow-2xl transition-all cursor-pointer border-none shadow-lg overflow-hidden group">
+                        {/* Featured Image */}
+                        <div className="relative h-48 overflow-hidden bg-slate-200">
+                          <img
+                            src={featuredImage}
+                            alt={post.title.rendered}
+                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                            onError={(e) => {
+                              // Fallback to default image if featured image fails to load
+                              (e.target as HTMLImageElement).src = getDefaultImage(index);
+                            }}
+                          />
+                          {firstCategory && (
+                            <div className="absolute top-4 left-4">
+                              <Badge
+                                className={`${
+                                  colorClasses[categoryColor]
+                                } border shadow-lg`}
+                              >
+                                {firstCategory}
+                              </Badge>
+                            </div>
+                          )}
+                        </div>
+
+                        <CardHeader>
+                          <CardTitle 
+                            className="text-xl leading-tight group-hover:text-indigo-600 transition-colors"
+                            dangerouslySetInnerHTML={{ __html: post.title.rendered }}
+                          />
+                        </CardHeader>
+                        <CardContent>
+                          <p className="text-slate-600 mb-4 leading-relaxed line-clamp-2">
+                            {stripHtml(post.excerpt.rendered)}
+                          </p>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4 text-sm text-slate-500">
+                              <div className="flex items-center gap-1">
+                                <Clock className="w-4 h-4" />
+                                <span>{readTime}</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Calendar className="w-4 h-4" />
+                                <span>{postDate}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 text-indigo-600 font-medium text-sm group-hover:gap-2 transition-all">
+                              <span>Read More</span>
+                              <ArrowRight className="w-4 h-4" />
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex items-center gap-1 text-indigo-600 font-medium text-sm group-hover:gap-2 transition-all">
-                          <span>Read More</span>
-                          <ArrowRight className="w-4 h-4" />
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              </motion.div>
-            ))}
-          </motion.div>
+                        </CardContent>
+                      </Card>
+                    </Link>
+                  </motion.div>
+                );
+              })}
+            </motion.div>
+          )}
+
+          {/* No Posts Message */}
+          {!loading && !error && posts.length === 0 && (
+            <div className="text-center py-20">
+              <p className="text-xl text-slate-600">No posts found.</p>
+            </div>
+          )}
+
+          {/* Load More Button */}
+          {!loading && posts.length > 0 && hasMore && (
+            <div className="flex justify-center mt-12">
+              <button
+                onClick={loadMorePosts}
+                disabled={loadingMore}
+                className="px-8 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {loadingMore ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>Loading...</span>
+                  </>
+                ) : (
+                  <span>Load More Posts</span>
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* End of Posts Message */}
+          {!loading && posts.length > 0 && !hasMore && (
+            <div className="text-center mt-12">
+              <p className="text-slate-600">You've reached the end of the posts.</p>
+            </div>
+          )}
         </div>
       </section>
 

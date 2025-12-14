@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { createPageUrl } from "./utils";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -16,16 +17,109 @@ import {
   BookmarkPlus,
   ChevronRight,
   CheckCircle,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
+import {
+  fetchPostBySlug,
+  fetchPostById,
+  getFeaturedImageUrl,
+  getPostCategories,
+  getPostAuthor,
+  formatDate,
+  calculateReadTime,
+  WordPressPost,
+} from "./services/wordpressApi";
 
 type BlogDetailProps = {
   blogId?: string | null;
+  slug?: string | null;
 };
 
-export default function BlogDetail({ blogId }: BlogDetailProps) {
+export default function BlogDetail({ blogId, slug: slugProp }: BlogDetailProps) {
+  const searchParams = useSearchParams();
   const [activeSection, setActiveSection] = useState("");
+  const [post, setPost] = useState<WordPressPost | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Sample blog data - in real app, this would come from a database
+  // Get slug from URL search params (priority) or from props
+  // useSearchParams might be null in some cases, so we use optional chaining
+  const slugFromUrl = searchParams?.get('slug');
+  const idFromUrl = searchParams?.get('id');
+  
+  // Use URL params first, then fall back to props
+  const slug = slugFromUrl || slugProp || null;
+  const blogIdFromUrl = idFromUrl || blogId || null;
+  
+  // Debug logging
+  useEffect(() => {
+    console.log('BlogDetail - slug from URL:', slugFromUrl);
+    console.log('BlogDetail - slug from props:', slugProp);
+    console.log('BlogDetail - final slug:', slug);
+    console.log('BlogDetail - blogId from URL:', idFromUrl);
+    console.log('BlogDetail - blogId from props:', blogId);
+    console.log('BlogDetail - final blogId:', blogIdFromUrl);
+  }, [slugFromUrl, slugProp, slug, idFromUrl, blogId, blogIdFromUrl]);
+
+  // Fetch post data from WordPress API
+  useEffect(() => {
+    loadPost();
+  }, [slug, blogIdFromUrl]);
+
+  const loadPost = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Debug logging
+      console.log('Loading post with:', { slug, blogId: blogIdFromUrl });
+
+      let fetchedPost: WordPressPost;
+
+      // Prioritize slug over blogId
+      if (slug) {
+        console.log('Fetching post by slug:', slug);
+        fetchedPost = await fetchPostBySlug(slug);
+      } else if (blogIdFromUrl) {
+        // If blogId is provided, try to fetch by ID (fallback)
+        console.log('Fetching post by ID:', blogIdFromUrl);
+        fetchedPost = await fetchPostById(parseInt(blogIdFromUrl));
+      } else {
+        throw new Error('No slug or blogId provided');
+      }
+
+      setPost(fetchedPost);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load post';
+      setError(errorMessage);
+      console.error('Error loading post:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Extract sections from post content for table of contents
+  const extractSections = (content: string) => {
+    if (!content) return [];
+    
+    // Simple regex to find headings (h2, h3)
+    const headingRegex = /<h[23][^>]*>(.*?)<\/h[23]>/gi;
+    const sections: Array<{ id: string; title: string }> = [];
+    let match;
+    let index = 0;
+
+    while ((match = headingRegex.exec(content)) !== null) {
+      const title = match[1].replace(/<[^>]*>/g, ''); // Strip HTML tags
+      const id = `section-${index}`;
+      sections.push({ id, title });
+      index++;
+    }
+
+    return sections;
+  };
+
+  // Sample blog data - fallback for old blogId-based routing (deprecated)
   const blogs = {
     "1": {
       id: "1",
@@ -218,17 +312,13 @@ export default function BlogDetail({ blogId }: BlogDetailProps) {
     },
   };
 
-  type BlogId = keyof typeof blogs;
-  const resolvedId: BlogId =
-    (blogId && (Object.keys(blogs) as BlogId[]).includes(blogId as BlogId)
-      ? (blogId as BlogId)
-      : "1");
-
-  const blog = blogs[resolvedId] || blogs["1"];
+  // Get sections from WordPress post or fallback
+  const sections = post ? extractSections(post.content.rendered) : [];
 
   useEffect(() => {
+    if (sections.length === 0) return;
+
     const handleScroll = () => {
-      const sections = blog.content.sections;
       const scrollPosition = window.scrollY + 200;
 
       for (let i = sections.length - 1; i >= 0; i--) {
@@ -242,7 +332,7 @@ export default function BlogDetail({ blogId }: BlogDetailProps) {
 
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
-  }, [blog]);
+  }, [sections]);
 
   const scrollToSection = (id: string) => {
     const element = document.getElementById(id);
@@ -251,6 +341,82 @@ export default function BlogDetail({ blogId }: BlogDetailProps) {
       const elementPosition = element.offsetTop - offset;
       window.scrollTo({ top: elementPosition, behavior: "smooth" });
     }
+  };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-indigo-600 mx-auto mb-4" />
+          <p className="text-slate-600">Loading post...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error || !post) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <div className="bg-white border-b border-slate-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <Link href={createPageUrl("Blog")}>
+              <Button variant="ghost" className="group" type="button">
+                <ArrowLeft className="w-4 h-4 mr-2 group-hover:-translate-x-1 transition-transform" />
+                Back to Blog
+              </Button>
+            </Link>
+          </div>
+        </div>
+        <div className="flex flex-col items-center justify-center py-20">
+          <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
+          <h3 className="text-xl font-semibold text-slate-900 mb-2">Error Loading Post</h3>
+          <p className="text-slate-600 mb-4">{error || 'Post not found'}</p>
+          <div className="flex gap-4">
+            <button
+              onClick={loadPost}
+              className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+            >
+              Retry
+            </button>
+            <Link href={createPageUrl("Blog")}>
+              <Button variant="outline">Back to Blog</Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Get post data
+  const featuredImage = getFeaturedImageUrl(post) || "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=1200&q=80";
+  const categories = getPostCategories(post);
+  const firstCategory = categories[0]?.name || 'Uncategorized';
+  const author = getPostAuthor(post);
+  const postDate = formatDate(post.date);
+  const readTime = calculateReadTime(post.content.rendered);
+
+  // Color mapping for categories
+  const colorClasses = {
+    yellow: "bg-yellow-100 text-yellow-800 border-yellow-200",
+    blue: "bg-blue-100 text-blue-800 border-blue-200",
+    purple: "bg-purple-100 text-purple-800 border-purple-200",
+    green: "bg-green-100 text-green-800 border-green-200",
+    red: "bg-red-100 text-red-800 border-red-200",
+    amber: "bg-amber-100 text-amber-800 border-amber-200",
+  } as const;
+
+  const getCategoryColor = (categoryName: string) => {
+    const categoryMap: Record<string, keyof typeof colorClasses> = {
+      'Study Techniques': 'yellow',
+      'Time Management': 'blue',
+      'Memory & Focus': 'purple',
+      'Goal Setting': 'green',
+      'Exam Preparation': 'red',
+      'Productivity': 'amber',
+    };
+    return colorClasses[categoryMap[categoryName] || 'blue'];
   };
 
   return (
@@ -275,9 +441,12 @@ export default function BlogDetail({ blogId }: BlogDetailProps) {
         className="relative h-96 bg-slate-900"
       >
         <img
-          src={blog.featuredImage}
-          alt={blog.title}
+          src={featuredImage}
+          alt={post.title.rendered}
           className="w-full h-full object-cover opacity-80"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=1200&q=80";
+          }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/50 to-transparent" />
       </motion.div>
@@ -293,31 +462,36 @@ export default function BlogDetail({ blogId }: BlogDetailProps) {
           >
             <Card className="border-none shadow-2xl">
               <CardContent className="p-8 md:p-12">
-                {/* Header */}
-                <div className="mb-8">
-                  <Badge className={`${blog.categoryColor} border mb-4`}>
-                    {blog.category}
-                  </Badge>
-                  <h1 className="text-4xl md:text-5xl font-bold text-slate-900 mb-6 leading-tight">
-                    {blog.title}
-                  </h1>
+                        {/* Header */}
+                        <div className="mb-8">
+                          {firstCategory && (
+                            <Badge className={`${getCategoryColor(firstCategory)} border mb-4`}>
+                              {firstCategory}
+                            </Badge>
+                          )}
+                          <h1 
+                            className="text-4xl md:text-5xl font-bold text-slate-900 mb-6 leading-tight"
+                            dangerouslySetInnerHTML={{ __html: post.title.rendered }}
+                          />
 
-                  {/* Meta Info */}
-                  <div className="flex flex-wrap items-center gap-4 text-slate-600">
-                    <div className="flex items-center gap-2">
-                      <User className="w-4 h-4" />
-                      <span>{blog.author}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Calendar className="w-4 h-4" />
-                      <span>{blog.date}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-4 h-4" />
-                      <span>{blog.readTime}</span>
-                    </div>
-                  </div>
-                </div>
+                          {/* Meta Info */}
+                          <div className="flex flex-wrap items-center gap-4 text-slate-600">
+                            {author && (
+                              <div className="flex items-center gap-2">
+                                <User className="w-4 h-4" />
+                                <span>{author.name}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-2">
+                              <Calendar className="w-4 h-4" />
+                              <span>{postDate}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Clock className="w-4 h-4" />
+                              <span>{readTime}</span>
+                            </div>
+                          </div>
+                        </div>
 
                 {/* Action Buttons */}
                 <div className="flex gap-3 mb-8 pb-8 border-b border-slate-200">
@@ -331,44 +505,14 @@ export default function BlogDetail({ blogId }: BlogDetailProps) {
                   </Button>
                 </div>
 
-                {/* Introduction */}
-                <div className="prose prose-lg max-w-none mb-12">
-                  <p className="text-xl text-slate-700 leading-relaxed">
-                    {blog.content.introduction}
-                  </p>
-                </div>
-
-                {/* Content Sections */}
-                <div className="space-y-12">
-                  {blog.content.sections.map((section, index) => (
-                    <motion.div
-                      key={section.id}
-                      id={section.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      whileInView={{ opacity: 1, y: 0 }}
-                      viewport={{ once: true, margin: "-100px" }}
-                      transition={{ duration: 0.5, delay: index * 0.1 }}
-                      className="scroll-mt-24"
-                    >
-                      <h2 className="text-3xl font-bold text-slate-900 mb-4">
-                        {section.title}
-                      </h2>
-                      <p className="text-lg text-slate-700 leading-relaxed">
-                        {section.content}
-                      </p>
-                    </motion.div>
-                  ))}
-                </div>
-
-                {/* Conclusion */}
-                <div className="mt-12 pt-12 border-t border-slate-200">
-                  <h2 className="text-3xl font-bold text-slate-900 mb-4">
-                    Conclusion
-                  </h2>
-                  <p className="text-lg text-slate-700 leading-relaxed">
-                    {blog.content.conclusion}
-                  </p>
-                </div>
+                        {/* Post Content */}
+                        <div 
+                          className="prose prose-lg max-w-none mb-12"
+                          dangerouslySetInnerHTML={{ __html: post.content.rendered }}
+                          style={{
+                            lineHeight: '1.8',
+                          }}
+                        />
 
                 {/* Call to Action */}
                 <div className="mt-12 p-8 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl text-white text-center">
@@ -406,56 +550,62 @@ export default function BlogDetail({ blogId }: BlogDetailProps) {
                     <BookmarkPlus className="w-5 h-5 text-indigo-600" />
                     Table of Contents
                   </h3>
-                  <nav className="space-y-2">
-                    {blog.content.sections.map((section) => (
-                      <button
-                        key={section.id}
-                        onClick={() => scrollToSection(section.id)}
-                        className={`w-full text-left px-4 py-2.5 rounded-lg transition-all group ${
-                          activeSection === section.id
-                            ? "bg-indigo-50 text-indigo-700 font-medium"
-                            : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          {activeSection === section.id && (
-                            <CheckCircle className="w-4 h-4 text-indigo-600 flex-shrink-0" />
-                          )}
-                          {activeSection !== section.id && (
-                            <div className="w-2 h-2 rounded-full bg-slate-300 group-hover:bg-indigo-400 transition-colors flex-shrink-0" />
-                          )}
-                          <span className="text-sm leading-tight">
-                            {section.title}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </nav>
+                  {sections.length > 0 ? (
+                    <nav className="space-y-2">
+                      {sections.map((section) => (
+                        <button
+                          key={section.id}
+                          onClick={() => scrollToSection(section.id)}
+                          className={`w-full text-left px-4 py-2.5 rounded-lg transition-all group ${
+                            activeSection === section.id
+                              ? "bg-indigo-50 text-indigo-700 font-medium"
+                              : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            {activeSection === section.id && (
+                              <CheckCircle className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+                            )}
+                            {activeSection !== section.id && (
+                              <div className="w-2 h-2 rounded-full bg-slate-300 group-hover:bg-indigo-400 transition-colors flex-shrink-0" />
+                            )}
+                            <span className="text-sm leading-tight">
+                              {section.title}
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </nav>
+                  ) : (
+                    <p className="text-sm text-slate-500">No table of contents available</p>
+                  )}
                 </CardContent>
               </Card>
 
               {/* Author Card */}
-              <Card className="border-none shadow-lg mt-6">
-                <CardContent className="p-6">
-                  <h3 className="text-lg font-bold text-slate-900 mb-4">
-                    About the Author
-                  </h3>
-                  <div className="flex items-start gap-4">
-                    <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center flex-shrink-0">
-                      <User className="w-6 h-6 text-white" />
+              {author && (
+                <Card className="border-none shadow-lg mt-6">
+                  <CardContent className="p-6">
+                    <h3 className="text-lg font-bold text-slate-900 mb-4">
+                      About the Author
+                    </h3>
+                    <div className="flex items-start gap-4">
+                      <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center flex-shrink-0">
+                        <User className="w-6 h-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-900">
+                          {author.name}
+                        </p>
+                        <p className="text-sm text-slate-600 mt-1">
+                          Educational content writer passionate about helping
+                          students succeed.
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="font-semibold text-slate-900">
-                        {blog.author}
-                      </p>
-                      <p className="text-sm text-slate-600 mt-1">
-                        Educational content writer passionate about helping
-                        students succeed.
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </motion.div>
         </div>
